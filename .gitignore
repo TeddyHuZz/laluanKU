@@ -3,6 +3,7 @@ otp-engine/otp-2.6.0-shaded.jar
 otp-engine/graphs/malaysia/graph.obj
 otp-engine/graphs/malaysia/malaysia-singapore-brunei-latest.osm.pbf
 otp-engine/graphs/malaysia/malaysia-singapore-brunei-latest.osm.pbf.bak
+otp-engine/graphs/malaysia/malaysia-singapore-brunei-latest.osm.pbf.kl_crop
 
 # Node dependencies
 **/node_modules/

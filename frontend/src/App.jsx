@@ -60,8 +60,8 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Major outer rail hubs in Klang Valley / Negeri Sembilan
-const RAIL_HUBS = [
+// Major outer rail hubs in Klang Valley / Negeri Sembilan to serve as a default fallback
+const DEFAULT_RAIL_HUBS = [
   { name: 'Nilai KTM Station', lat: 2.802356, lon: 101.799303 },
   { name: 'Seremban KTM Station', lat: 2.719169, lon: 101.940792 },
   { name: 'Labu KTM Station', lat: 2.754501, lon: 101.826656 },
@@ -166,6 +166,43 @@ function App() {
   const [selectedItineraryIdx, setSelectedItineraryIdx] = useState(0);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [railHubs, setRailHubs] = useState(DEFAULT_RAIL_HUBS);
+
+  // Fetch rail hubs dynamically from OpenTripPlanner on startup
+  useEffect(() => {
+    const fetchRailHubs = async () => {
+      try {
+        const graphqlQuery = {
+          query: `
+            query {
+              stops {
+                name
+                lat
+                lon
+                vehicleMode
+              }
+            }
+          `
+        };
+        const response = await axios.post('http://localhost:8080/otp/routers/default/index/graphql', graphqlQuery);
+        const stops = response.data?.data?.stops || [];
+        // Filter for train modes: SUBWAY (LRT/MRT), TRAM (KTM Komuter), and RAIL (ETS/KTM ETS)
+        const filteredHubs = stops
+          .filter(stop => ['SUBWAY', 'TRAM', 'RAIL'].includes(stop.vehicleMode))
+          .map(stop => ({
+            name: stop.name,
+            lat: parseFloat(stop.lat),
+            lon: parseFloat(stop.lon)
+          }));
+        if (filteredHubs.length > 0) {
+          setRailHubs(filteredHubs);
+        }
+      } catch (err) {
+        console.error('Failed to fetch rail hubs dynamically from OTP, using default list:', err);
+      }
+    };
+    fetchRailHubs();
+  }, []);
 
   const itineraries = allItineraries[primaryMode] || [];
 
@@ -178,17 +215,17 @@ function App() {
   const defaultCenter = [3.1390, 101.6869];
   const defaultZoom = 13;
 
-  // Handle Geocoding Search via OpenStreetMap Nominatim restricted to Klang Valley
+  // Handle Geocoding Search via OpenStreetMap Nominatim restricted to Peninsular Malaysia
   const searchLocations = async (query, setResults) => {
     if (query.trim().length < 3) {
       setResults([]);
       return;
     }
     try {
-      // restricted to Malaysia/Klang Valley box to prevent foreign results
+      // restricted to Peninsular Malaysia to prevent foreign results
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
         query
-      )}&viewbox=100.7,2.5,102.0,3.9&bounded=1&limit=5`;
+      )}&viewbox=99.5,1.2,104.5,6.8&bounded=1&limit=5`;
       const res = await axios.get(url);
       setResults(res.data || []);
     } catch (err) {
@@ -302,7 +339,7 @@ function App() {
 
     if (selectedDest) {
       let minDistance = Infinity;
-      RAIL_HUBS.forEach(hub => {
+      railHubs.forEach(hub => {
         const dist = getDistance(parseFloat(selectedDest.lat), parseFloat(selectedDest.lon), hub.lat, hub.lon);
         if (dist < minDistance) {
           minDistance = dist;
