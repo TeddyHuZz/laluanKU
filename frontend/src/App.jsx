@@ -48,6 +48,32 @@ function decodePolyline(encoded) {
   return points;
 }
 
+// Haversine formula to compute distance in km between two lat/lon coordinates
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+// Major outer rail hubs in Klang Valley / Negeri Sembilan
+const RAIL_HUBS = [
+  { name: 'Nilai KTM Station', lat: 2.802356, lon: 101.799303 },
+  { name: 'Seremban KTM Station', lat: 2.719169, lon: 101.940792 },
+  { name: 'Labu KTM Station', lat: 2.754501, lon: 101.826656 },
+  { name: 'Tiroi KTM Station', lat: 2.741459, lon: 101.871914 },
+  { name: 'Sungai Gadut KTM Station', lat: 2.660898, lon: 101.996158 },
+  { name: 'Senawang KTM Station', lat: 2.690138, lon: 101.972336 },
+  { name: 'Kajang KTM/MRT Station', lat: 2.9831, lon: 101.7901 },
+  { name: 'Sungai Buloh Station', lat: 3.2064, lon: 101.5804 },
+  { name: 'Port Klang KTM Station', lat: 2.9993, lon: 101.3918 },
+  { name: 'Rawang KTM Station', lat: 3.3224, lon: 101.5779 },
+];
+
 // Estimates Malaysia public transit fares based on route leg distance & modes
 function calculateEstimatedFare(legs) {
   let totalFare = 0;
@@ -63,12 +89,12 @@ function calculateEstimatedFare(legs) {
       } else {
         totalFare += 1.50; // Trunk Line Bus flat rate
       }
-    } else if (leg.mode === 'SUBWAY' || leg.mode === 'MONORAIL' || leg.mode === 'TRAM') {
+    } else if (leg.mode === 'SUBWAY' || leg.mode === 'MONORAIL') {
       hasTransit = true;
       // LRT/MRT fare: base RM 1.20 + ~RM 0.18 per km
       const fare = 1.20 + distanceKm * 0.18;
       totalFare += Math.min(6.00, Math.max(1.20, fare));
-    } else if (leg.mode === 'RAIL') {
+    } else if (leg.mode === 'RAIL' || leg.mode === 'TRAM') {
       hasTransit = true;
       // KTM Komuter fare: base RM 1.50 + ~RM 0.12 per km
       const fare = 1.50 + distanceKm * 0.12;
@@ -246,7 +272,10 @@ function App() {
       transitModes.push({ mode: 'SUBWAY' });
       transitModes.push({ mode: 'MONORAIL' });
     }
-    if (modes.rail) transitModes.push({ mode: 'RAIL' });
+    if (modes.rail) {
+      transitModes.push({ mode: 'RAIL' });
+      transitModes.push({ mode: 'TRAM' }); // KTM Komuter is classified as TRAM in the graph
+    }
     if (transitModes.length === 1) {
       transitModes.push({ mode: 'TRANSIT' });
     }
@@ -258,9 +287,32 @@ function App() {
       mixedModes.push({ mode: 'SUBWAY' });
       mixedModes.push({ mode: 'MONORAIL' });
     }
-    if (modes.rail) mixedModes.push({ mode: 'RAIL' });
+    if (modes.rail) {
+      mixedModes.push({ mode: 'RAIL' });
+      mixedModes.push({ mode: 'TRAM' }); // KTM Komuter is TRAM
+    }
     if (mixedModes.length === 1) {
       mixedModes.push({ mode: 'TRANSIT' });
+    }
+
+    // Determine the closest rail hub to the destination for egress driving mixed mode
+    let hubLat = 0;
+    let hubLon = 0;
+    let closestHub = null;
+
+    if (selectedDest) {
+      let minDistance = Infinity;
+      RAIL_HUBS.forEach(hub => {
+        const dist = getDistance(parseFloat(selectedDest.lat), parseFloat(selectedDest.lon), hub.lat, hub.lon);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestHub = hub;
+        }
+      });
+      if (closestHub) {
+        hubLat = closestHub.lat;
+        hubLon = closestHub.lon;
+      }
     }
 
     const itinerarySelection = `
@@ -305,6 +357,8 @@ function App() {
           $fromLon: Float!,
           $toLat: Float!,
           $toLon: Float!,
+          $hubLat: Float!,
+          $hubLon: Float!,
           $transitModes: [TransportMode!],
           $mixedModes: [TransportMode!]
         ) {
@@ -340,11 +394,27 @@ function App() {
           ) {
             ${itinerarySelection}
           }
-          mixed: plan(
+          mixedPark: plan(
             from: { lat: $fromLat, lon: $fromLon }
             to: { lat: $toLat, lon: $toLon }
             transportModes: $mixedModes
             numItineraries: 5
+          ) {
+            ${itinerarySelection}
+          }
+          egressTransit: plan(
+            from: { lat: $fromLat, lon: $fromLon }
+            to: { lat: $hubLat, lon: $hubLon }
+            transportModes: $transitModes
+            numItineraries: 3
+          ) {
+            ${itinerarySelection}
+          }
+          egressDrive: plan(
+            from: { lat: $hubLat, lon: $hubLon }
+            to: { lat: $toLat, lon: $toLon }
+            transportModes: [{ mode: CAR }]
+            numItineraries: 1
           ) {
             ${itinerarySelection}
           }
@@ -355,6 +425,8 @@ function App() {
         fromLon: parseFloat(selectedOrigin.lon),
         toLat: parseFloat(selectedDest.lat),
         toLon: parseFloat(selectedDest.lon),
+        hubLat: hubLat,
+        hubLon: hubLon,
         transitModes: transitModes,
         mixedModes: mixedModes,
       },
@@ -365,12 +437,56 @@ function App() {
       const response = await axios.post('http://localhost:8080/otp/routers/default/index/graphql', graphqlQuery);
       const data = response.data?.data;
       if (data) {
+        // Construct combined egress transit + egress driving itineraries (Transit to Hub + Egress Car to Destination)
+        const combinedEgressItineraries = [];
+        const eTransit = data.egressTransit?.itineraries || [];
+        const eDrive = data.egressDrive?.itineraries || [];
+        
+        if (eTransit.length > 0 && eDrive.length > 0 && closestHub) {
+          eTransit.forEach((transitItinerary) => {
+            const driveItinerary = eDrive[0];
+            const driveLeg = driveItinerary.legs[0] || {
+              mode: 'CAR',
+              duration: driveItinerary.duration,
+              distance: driveItinerary.duration * 13,
+              startTime: transitItinerary.endTime,
+              endTime: transitItinerary.endTime + driveItinerary.duration * 1000,
+              from: { name: closestHub.name, lat: closestHub.lat, lon: closestHub.lon },
+              to: { name: selectedDest.name, lat: parseFloat(selectedDest.lat), lon: parseFloat(selectedDest.lon) },
+              legGeometry: { points: '' }
+            };
+
+            const updatedDriveLeg = {
+              ...driveLeg,
+              startTime: transitItinerary.endTime,
+              endTime: transitItinerary.endTime + driveLeg.duration * 1000,
+              from: { name: closestHub.name, lat: closestHub.lat, lon: closestHub.lon },
+              to: { name: selectedDest.name, lat: parseFloat(selectedDest.lat), lon: parseFloat(selectedDest.lon) }
+            };
+
+            combinedEgressItineraries.push({
+              duration: transitItinerary.duration + driveItinerary.duration,
+              startTime: transitItinerary.startTime,
+              endTime: transitItinerary.endTime + driveItinerary.duration * 1000,
+              walkDistance: transitItinerary.walkDistance,
+              numberOfTransfers: transitItinerary.numberOfTransfers + 1,
+              legs: [...transitItinerary.legs, updatedDriveLeg]
+            });
+          });
+        }
+
+        const standardParkAndRide = data.mixedPark?.itineraries || [];
+        const mixedItineraries = [...standardParkAndRide, ...combinedEgressItineraries];
+        
+        // Sort mixed itineraries by duration so the fastest route option is presented first
+        mixedItineraries.sort((a, b) => a.duration - b.duration);
+
         setAllItineraries({
           transit: data.transit?.itineraries || [],
           drive: data.drive?.itineraries || [],
           walk: data.walk?.itineraries || [],
           bicycle: data.bicycle?.itineraries || [],
-          mixed: data.mixed?.itineraries || [],
+          mixed: mixedItineraries,
         });
         setSelectedItineraryIdx(0);
       } else {
@@ -433,7 +549,7 @@ function App() {
         } else if (leg.mode === 'SUBWAY' || leg.mode === 'MONORAIL') {
           color = '#3b82f6'; // LRT/MRT (blue)
           dashArray = '';
-        } else if (leg.mode === 'RAIL') {
+        } else if (leg.mode === 'RAIL' || leg.mode === 'TRAM') {
           color = '#10b981'; // KTM (green)
           dashArray = '';
         } else if (leg.mode === 'CAR') {
@@ -480,7 +596,7 @@ function App() {
       if (nonWalkLeg) {
         if (nonWalkLeg.mode === 'BUS') return '🚌';
         if (nonWalkLeg.mode === 'SUBWAY' || nonWalkLeg.mode === 'MONORAIL') return '🚇';
-        if (nonWalkLeg.mode === 'RAIL') return '🚆';
+        if (nonWalkLeg.mode === 'RAIL' || nonWalkLeg.mode === 'TRAM') return '🚆';
         if (nonWalkLeg.mode === 'CAR') return '🚗';
       }
     }
@@ -862,7 +978,7 @@ function App() {
                                 <span className="text-orange-400 font-bold" title="Bus">🚌 {leg.route?.shortName || 'Bus'}</span>
                               ) : leg.mode === 'SUBWAY' || leg.mode === 'MONORAIL' ? (
                                 <span className="text-blue-400 font-bold" title="LRT/MRT">🚇 {leg.route?.shortName || 'MRT'}</span>
-                              ) : leg.mode === 'RAIL' ? (
+                              ) : leg.mode === 'RAIL' || leg.mode === 'TRAM' ? (
                                 <span className="text-emerald-400 font-bold" title="KTM">🚊 {leg.route?.shortName || 'KTM'}</span>
                               ) : leg.mode === 'CAR' ? (
                                 <span className="text-purple-400 font-bold" title="Drive">🚗 Drive</span>
@@ -907,7 +1023,7 @@ function App() {
                                   leg.mode === 'WALK' ? 'bg-slate-400 border-slate-900' :
                                   leg.mode === 'BUS' ? 'bg-orange-500 border-slate-900' :
                                   leg.mode === 'SUBWAY' || leg.mode === 'MONORAIL' ? 'bg-blue-500 border-slate-900' :
-                                  leg.mode === 'RAIL' ? 'bg-emerald-500 border-slate-900' :
+                                  (leg.mode === 'RAIL' || leg.mode === 'TRAM') ? 'bg-emerald-500 border-slate-900' :
                                   leg.mode === 'CAR' ? 'bg-purple-500 border-slate-900' :
                                   leg.mode === 'BICYCLE' ? 'bg-yellow-500 border-slate-900' :
                                   'bg-slate-500 border-slate-900'
@@ -919,6 +1035,7 @@ function App() {
                                       {leg.mode === 'WALK' ? 'Walk' :
                                        leg.mode === 'CAR' ? 'Drive' :
                                        leg.mode === 'BICYCLE' ? 'Cycle' :
+                                       (leg.mode === 'RAIL' || leg.mode === 'TRAM') ? `KTM ${leg.route?.shortName || ''}` :
                                        `${leg.mode} ${leg.route?.shortName || ''}`}
                                     </span>
                                     <span className="text-slate-400">{Math.round(leg.duration / 60)} min</span>
