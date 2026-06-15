@@ -1,0 +1,22 @@
+{
+  "routingDefaults": {
+    "numItineraries": 5,
+    "walkSpeed": 1.4,
+    "transferPenalty": 0,
+    "maxTransfers": 5
+  },
+  "updaters": [
+    {
+      "type": "VEHICLE_POSITIONS",
+      "frequencySec": 60,
+      "feedId": "prasarana",
+      "url": "https://api.data.gov.my/gtfs-realtime/vehicle-position/prasarana?category=rapid-bus-kl"
+    },
+    {
+      "type": "VEHICLE_POSITIONS",
+      "frequencySec": 60,
+      "feedId": "ktmb",
+      "url": "https://api.data.gov.my/gtfs-realtime/vehicle-position/ktmb"
+    }
+  ]
+}

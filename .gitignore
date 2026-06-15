@@ -1,0 +1,15 @@
+# OpenTripPlanner large files
+otp-engine/otp-2.6.0-shaded.jar
+otp-engine/graphs/malaysia/graph.obj
+otp-engine/graphs/malaysia/malaysia-singapore-brunei-latest.osm.pbf
+otp-engine/graphs/malaysia/malaysia-singapore-brunei-latest.osm.pbf.bak
+
+# Node dependencies
+**/node_modules/
+**/dist/
+**/.env
+
+# Local IDEs and OS files
+.DS_Store
+.vscode/
+.idea/
